@@ -93,8 +93,8 @@ jobs:
                   title: '🚨 Sync Fail | 同步失败',   // Issue 标题，和原配置一致
                   labels: ['🚨 Sync Fail'],           // Issue 标签，数组格式
                   body: `同步上游仓库失败！请手动执行以下操作：
-                  1. 克隆你的Fork仓库：git clone https://github.com/${context.repo.owner}/skills-hub.git
-                  2. 添加上游仓库：git remote add upstream https://github.com/qufei1993/skills-hub.git
+                  1. 克隆你的Fork仓库：git clone https://github.com/${context.repo.owner}/fiddler-everywhere-enhance.git
+                  2. 添加上游仓库：git remote add upstream https://github.com/msojocs/fiddler-everywhere-enhance.git
                   3. 拉取上游更新：git pull upstream main
                   4. 推送本地：git push origin main`  // Issue 正文，自动填充仓库所有者
               };
