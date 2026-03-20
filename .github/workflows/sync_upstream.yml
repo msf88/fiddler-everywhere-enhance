@@ -27,25 +27,42 @@ jobs:
     runs-on: ubuntu-latest
     # 条件判断：仅当当前仓库是 Fork 仓库时，才执行该任务（避免在原仓库上误执行同步逻辑）
     if: ${{ github.event.repository.fork }}
+    # 环境变量配置：强制使用 Node.js 24 版本（确保与上游仓库同步工具兼容）
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true  # 全局作用于整个 job
 
     # 任务步骤：按顺序执行的具体操作（从检出代码到同步验证）
     steps:
       # 步骤 1：检出当前 Fork 仓库的代码到运行环境
-      # 使用官方 checkout 动作 v4 版本，确保能正常拉取仓库文件
-      - uses: actions/checkout@v4
+      # 使用官方 checkout 动作 v5 版本，确保能正常拉取仓库文件
+      - uses: actions/checkout@v5
 
       # 步骤 2：清理历史同步失败的 issue 通知
-      # 使用 actions-cool/issues-helper 工具 v3 版本，简化 issue 批量操作
+      # 使用 actions/github-script 动作 v8 版本，直接在 GitHub Actions 环境中执行 JavaScript 代码
       - name: Clean issue notice
-        uses: actions-cool/issues-helper@v3
+        uses: actions/github-script@v8
         with:
-          # 执行的动作：关闭符合条件的 issues
-          actions: 'close-issues'
-          # 筛选条件：关闭所有带有「🚨 Sync Fail」标签的 issue
-          labels: '🚨 Sync Fail'
+          script: |
+            // 获取带「🚨 Sync Fail」标签的开放 Issue
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: '🚨 Sync Fail',
+              per_page: 100
+            });
+      
+            // 批量关闭符合条件的 Issue
+            for (const issue of issues.data) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                state: 'closed'
+              });
+            }
 
       # 步骤 3：核心同步操作：拉取上游仓库最新提交并合并到当前 Fork 仓库
-      # 使用 aormsby/Fork-Sync-With-Upstream-action 工具 v3.4 版本（专门用于 Fork 仓库同步的成熟动作）
       - name: Sync upstream changes
         id: sync  # 给该步骤设置唯一 ID，便于后续步骤判断该步骤的执行结果（成功/失败）
         uses: aormsby/Fork-Sync-With-Upstream-action@v3.4
@@ -65,16 +82,28 @@ jobs:
       # 条件判断：仅当步骤 3（id: sync）执行失败时，才执行该步骤
       - name: Sync check
         if: failure()
-        uses: actions-cool/issues-helper@v3
+        uses: actions/github-script@v8
         with:
-          # 执行的动作：创建一个新的 issue
-          actions: 'create-issue'
-          # issue 标题：明确标注「同步失败」，便于快速识别
-          title: '🚨 Sync Fail | 同步失败'
-          # 给新建 issue 添加标签，便于筛选和后续清理
-          labels: '🚨 Sync Fail'
-          # issue 正文内容：同时提供英文和中文说明，告知失败原因和处理方式，并附带参考截图
-          body: |
-            Due to a change in the workflow file of the upstream repository, GitHub has automatically suspended the scheduled automatic update. You need to manually sync your fork. 
-            由于上游仓库的工作流文件发生了更改，GitHub 已自动暂停了计划的自动更新。您需要手动同步您的分叉仓库。
-            ![](https://github-production-user-asset-6210df.s3.amazonaws.com/17870709/273954625-df80c890-0822-4ac2-95e6-c990785cbed5.png)
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            // 1. 定义要创建的 Issue 内容
+            const issueData = {
+                  owner: context.repo.owner,          // 当前仓库所有者（自动获取）
+                  repo: context.repo.repo,            // 当前仓库名（自动获取）
+                  title: '🚨 Sync Fail | 同步失败',   // Issue 标题，和原配置一致
+                  labels: ['🚨 Sync Fail'],           // Issue 标签，数组格式
+                  body: `同步上游仓库失败！请手动执行以下操作：
+                  1. 克隆你的Fork仓库：git clone https://github.com/${context.repo.owner}/skills-hub.git
+                  2. 添加上游仓库：git remote add upstream https://github.com/qufei1993/skills-hub.git
+                  3. 拉取上游更新：git pull upstream main
+                  4. 推送本地：git push origin main`  // Issue 正文，自动填充仓库所有者
+              };
+              
+            // 2. 调用 GitHub API 创建 Issue
+            try {
+                const response = await github.rest.issues.create(issueData);
+                console.log(`✅ 同步失败通知 Issue 创建成功：#${response.data.number}`);
+            } catch (error) {
+                console.error(`❌ 创建 Issue 失败：${error.message}`);
+                throw error;  // 抛出错误，让 Actions 步骤显示失败
+            }
